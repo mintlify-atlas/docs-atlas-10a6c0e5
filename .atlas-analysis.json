@@ -1,0 +1,69 @@
+{
+  "projectType": "api-service",
+  "projectName": "Social Media Fetcher",
+  "projectDescription": "A Node.js REST API that bulk-downloads images and videos from major social media platforms using browser automation and direct REST/GraphQL endpoints.",
+  "theme": "sequoia",
+  "primaryColor": "#6366F1",
+  "lightColor": "#818CF8",
+  "darkColor": "#4338CA",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": ["introduction", "quickstart", "configuration"]
+          },
+          {
+            "group": "Architecture",
+            "pages": ["architecture/overview", "architecture/engines", "architecture/concurrency"]
+          },
+          {
+            "group": "Guides",
+            "pages": ["guides/authentication", "guides/session-setup", "guides/security"]
+          }
+        ]
+      },
+      {
+        "tab": "API Reference",
+        "groups": [
+          {
+            "group": "Endpoints",
+            "pages": [
+              "api/overview",
+              "api/deviantart",
+              "api/onlyfans",
+              "api/pixiv",
+              "api/x-twitter",
+              "api/threads",
+              "api/tiktok",
+              "api/pinterest",
+              "api/instagram"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "Bulk media download (images & videos) from 8 social platforms",
+    "Browser automation with Puppeteer Stealth for anti-bot bypass",
+    "Session persistence via browser profile userDataDir (OnlyFans)",
+    "Concurrent downloads with a configurable pool via mapLimit utility",
+    "Network request interception for CSRF tokens and user metadata",
+    "Stagnation detection to prevent infinite scroll loops",
+    "Referer spoofing and cookie injection per platform",
+    "Automatic filename sanitization for cross-platform compatibility"
+  ],
+  "publicApiSurface": [
+    "GET /deviantart/get-all-media?username=&limit=",
+    "GET /onlyfans/get-all-media?username=&limit=",
+    "GET /pixiv/get-all-media?userId=&limit=&mediaType=",
+    "GET /x/get-all-media?username=&limit=&method=",
+    "GET /threads/get-all-media?username=&limit=",
+    "GET /tiktok/get-all-media?username=&limit=",
+    "GET /pinterest/get-all-media?username=&limit=",
+    "GET /instagram/get-all-media?username=&limit="
+  ]
+}
