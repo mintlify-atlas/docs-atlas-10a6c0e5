@@ -1,0 +1,162 @@
+---
+title: "API overview"
+description: "Base URL, common parameters, response format, and error codes for all SMF endpoints."
+---
+
+## Base URL
+
+All endpoints are served from:
+
+```
+http://localhost:3000
+```
+
+The port is configurable via the `PORT` environment variable. If `PORT` is set, the server binds to that port instead.
+
+## Authentication
+
+SMF does not use Authorization headers. Authentication is handled per-platform through environment variables (cookies, tokens) defined in your `.env` file, or via a persistent browser profile for platforms that require interactive login. See each platform's page for the specific variables required.
+
+## Request format
+
+All endpoints accept **HTTP GET** requests. Parameters are passed as query string arguments.
+
+## Common query parameters
+
+These parameters are accepted by most endpoints.
+
+<ParamField query="username" type="string" required>
+  The platform username or handle of the account to fetch media from. Leading `@` symbols are stripped automatically.
+</ParamField>
+
+<ParamField query="limit" type="integer">
+  Maximum number of media items to collect. Omit to collect all available content. When provided, collection stops once this count is reached.
+</ParamField>
+
+## Response format
+
+A successful response returns HTTP 200 with a JSON body.
+
+```json
+{
+  "status": true,
+  "profile": {
+    "id": "123456789",
+    "username": "exampleuser",
+    "nickname": "Example User",
+    "picture": "https://cdn.example.com/avatars/exampleuser.jpg",
+    "header": "https://cdn.example.com/headers/exampleuser.jpg",
+    "url": "https://platform.com/exampleuser"
+  },
+  "total_requested": 50,
+  "total_processed": 50,
+  "downloads": [
+    { "status": "downloaded", "fileName": "abc123.jpg" },
+    { "status": "exists", "fileName": "def456.mp4" },
+    { "status": "error", "fileName": "ghi789.jpg", "error": "Request failed with status 403" }
+  ]
+}
+```
+
+### Response fields
+
+<ResponseField name="status" type="boolean" required>
+  `true` when the request completed without a fatal error.
+</ResponseField>
+
+<ResponseField name="profile" type="object">
+  Profile metadata for the fetched account.
+  <Expandable title="properties">
+    <ResponseField name="id" type="string">
+      Platform-assigned user ID.
+    </ResponseField>
+    <ResponseField name="username" type="string">
+      The account's handle (without `@`).
+    </ResponseField>
+    <ResponseField name="nickname" type="string">
+      The account's display name.
+    </ResponseField>
+    <ResponseField name="picture" type="string">
+      URL of the profile avatar.
+    </ResponseField>
+    <ResponseField name="header" type="string">
+      URL of the profile header or banner image. Empty string if not available.
+    </ResponseField>
+    <ResponseField name="url" type="string">
+      Direct URL to the account's profile page.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="total_requested" type="integer">
+  The value of the `limit` parameter. `null` if no limit was specified.
+</ResponseField>
+
+<ResponseField name="total_processed" type="integer">
+  Number of download tasks that were processed in this request.
+</ResponseField>
+
+<ResponseField name="downloads" type="array">
+  One entry per file processed.
+  <Expandable title="item properties">
+    <ResponseField name="status" type="string" required>
+      Result of the download attempt. One of `"downloaded"`, `"exists"`, or `"error"`.
+    </ResponseField>
+    <ResponseField name="fileName" type="string" required>
+      File name on disk.
+    </ResponseField>
+    <ResponseField name="error" type="string">
+      Error message. Only present when `status` is `"error"`.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+### Download status values
+
+| Value | Meaning |
+|---|---|
+| `"downloaded"` | File did not exist on disk and was saved successfully. |
+| `"exists"` | File was already present on disk; download was skipped. |
+| `"error"` | Download failed. The `error` field contains the reason. |
+
+## Error responses
+
+When a request cannot be completed, the API returns HTTP 400 or 500 with:
+
+```json
+{
+  "status": false,
+  "error": "Description of what went wrong"
+}
+```
+
+HTTP 400 is returned for missing required parameters. HTTP 500 is returned for runtime errors such as authentication failures or network problems.
+
+## Endpoints
+
+<CardGroup cols={2}>
+  <Card title="DeviantArt" icon="palette" href="/api/deviantart">
+    `GET /deviantart/get-all-media`
+  </Card>
+  <Card title="OnlyFans" icon="lock" href="/api/onlyfans">
+    `GET /onlyfans/get-all-media`
+  </Card>
+  <Card title="Pixiv" icon="image" href="/api/pixiv">
+    `GET /pixiv/get-all-media`
+  </Card>
+  <Card title="X (Twitter)" icon="x-twitter" href="/api/x-twitter">
+    `GET /x/get-all-media`
+  </Card>
+  <Card title="Threads" icon="at-sign" href="/api/threads">
+    `GET /threads/get-all-media`
+  </Card>
+  <Card title="TikTok" icon="music" href="/api/tiktok">
+    `GET /tiktok/get-all-media`
+  </Card>
+  <Card title="Pinterest" icon="pin" href="/api/pinterest">
+    `GET /pinterest/get-all-media`
+  </Card>
+  <Card title="Instagram" icon="instagram" href="/api/instagram">
+    `GET /instagram/get-all-media`
+  </Card>
+</CardGroup>

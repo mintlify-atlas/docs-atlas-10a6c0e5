@@ -1,0 +1,72 @@
+---
+title: "Social Media Fetcher"
+description: "Bulk-download images and videos from 8 major social platforms via a single REST API."
+---
+
+## What is Social Media Fetcher?
+
+**Social Media Fetcher (SMF)** is a self-hosted Node.js REST API that automates bulk media downloads from major social networks. It combines headless browser automation (Puppeteer Stealth) with direct REST/GraphQL calls to extract full galleries — profile pictures, posts, reels, stories, and videos — and save them to local storage.
+
+<CardGroup cols={2}>
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Clone, configure, and run your first download in minutes.
+  </Card>
+  <Card title="Configuration" icon="gear" href="/configuration">
+    Set up environment variables and concurrency settings.
+  </Card>
+  <Card title="API Reference" icon="code" href="/api/overview">
+    Browse all 8 platform endpoints with full parameter docs.
+  </Card>
+  <Card title="Architecture" icon="sitemap" href="/architecture/overview">
+    Understand the engine layers and how SMF bypasses anti-bot measures.
+  </Card>
+</CardGroup>
+
+## Supported platforms
+
+| Platform | Engine | Content types |
+|---|---|---|
+| **DeviantArt** | Hybrid Puppeteer + REST | Gallery images, header, avatar |
+| **OnlyFans** | Puppeteer (session persistence) | Photos, videos |
+| **Pixiv** | REST (internal API) | Illustrations, manga pages |
+| **X (Twitter)** | Puppeteer Stealth | Images, videos |
+| **Threads** | Puppeteer + GraphQL | Photos, videos |
+| **TikTok** | Puppeteer Stealth | Videos (watermark-free), avatar |
+| **Pinterest** | REST (bookmark pagination) | Images, videos |
+| **Instagram** | REST + session cookies | Posts, reels, stories, highlights |
+
+## Key features
+
+<CardGroup cols={2}>
+  <Card title="Anti-bot bypass" icon="shield-halved">
+    Puppeteer Stealth plugin masks automation fingerprints. Cookie injection, PerimeterX bypass, and CSRF token interception handle platform-specific defenses.
+  </Card>
+  <Card title="Concurrent downloads" icon="bolt">
+    A configurable promise-pool (`mapLimit`) keeps exactly N downloads active simultaneously, preventing CPU spikes and IP rate-limiting.
+  </Card>
+  <Card title="Session persistence" icon="floppy-disk">
+    OnlyFans uses a persistent Chrome profile directory so manual login is only required once — subsequent runs reuse the saved session.
+  </Card>
+  <Card title="Smart scroll" icon="arrows-up-down">
+    Stagnation detection tracks whether new items appear after each scroll. After 3 consecutive empty scrolls it exits gracefully instead of looping forever.
+  </Card>
+  <Card title="Referer spoofing" icon="globe">
+    Per-request `Referer` and `User-Agent` headers are injected to simulate organic browser traffic, bypassing hotlink protection on Pixiv and X.
+  </Card>
+  <Card title="Safe filenames" icon="file">
+    Post titles are sanitized (`\/:*?"<>|` stripped) and truncated to 25 characters, ensuring compatibility with Windows and Linux file systems.
+  </Card>
+</CardGroup>
+
+## How it works
+
+SMF exposes one endpoint per platform. Each endpoint:
+
+1. Authenticates via injected session cookies from your `.env` file.
+2. Scrapes or calls the platform's internal API to collect media URLs.
+3. Downloads all files concurrently to `DIR_STORAGE/<platform>/<username>/`.
+4. Returns a JSON response with the profile metadata and a download status list.
+
+<Note>
+SMF is a self-hosted tool. You supply your own authenticated session cookies. No credentials are stored remotely.
+</Note>

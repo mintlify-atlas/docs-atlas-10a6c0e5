@@ -1,0 +1,131 @@
+---
+title: "Security and best practices"
+description: "Guidelines for safe operation, rate limiting, and protecting your credentials."
+---
+
+## Credential security
+
+SMF authenticates as your personal browser session. The cookies in your `.env` file grant the same access as being logged in to each platform.
+
+- **Never commit `.env` to version control.** The repository's `.gitignore` already excludes it, but double-check before pushing.
+- **Rotate cookies immediately if accidentally exposed.** Log out and back in on the affected platform to invalidate the old session. Then re-extract fresh cookies.
+- **Run SMF on a private network or behind a firewall.** SMF's HTTP server has no built-in authentication — anyone who can reach the port can trigger downloads using your credentials.
+
+## Rate limiting and IP safety
+
+### Concurrency control
+
+The `THREADS_DOWNLOAD` variable in `.env` controls how many files are downloaded in parallel. SMF uses a promise pool (`mapLimit`) rather than `Promise.all`, so exactly `THREADS_DOWNLOAD` downloads are active at any given time:
+
+```env
+THREADS_DOWNLOAD=5
+```
+
+Keeping this value low (3–5) reduces the risk of triggering platform-side rate limiting or IP bans. Burst traffic patterns are a common signal used by CDN firewalls.
+
+### Jitter delay between downloads
+
+The DeviantArt controller introduces a randomized delay between each file download to avoid uniform request timing:
+
+```javascript
+const jitter = Math.floor(Math.random() * 1000) + 500;
+await new Promise(r => setTimeout(r, jitter));
+```
+
+This produces a random pause of 500–1500 ms between downloads, making the traffic pattern less predictable and harder to identify as automated.
+
+### Human mouse simulation
+
+When scraping with Puppeteer (X, OnlyFans), SMF calls `moveMouseInCircle` before each scroll to simulate human cursor movement:
+
+```javascript
+const moveMouseInCircle = async (p) => {
+    const { w, h } = await p.evaluate(() => ({ w: window.innerWidth, h: window.innerHeight }));
+
+    const centerX = (w / 2) + (Math.random() * 20 - 10);
+    const centerY = (h / 2) + (Math.random() * 20 - 10);
+    
+    const baseRadius = 100;
+    const steps = 40;
+
+    for (let i = 0; i <= steps; i++) {
+        const drift = Math.sin(i * 0.5) * 0.1; 
+        const angle = ((i / steps) * (Math.PI * 2)) + drift;
+
+        const irregularRadius = baseRadius + (Math.random() * 15 - 7.5) + (Math.cos(i * 0.3) * 10);
+
+        const x = centerX + irregularRadius * Math.cos(angle);
+        const y = centerY + irregularRadius * Math.sin(angle);
+
+        await p.mouse.move(x, y);
+        
+        const delay = 15 + Math.random() * 25;
+        await new Promise(r => setTimeout(r, delay));
+    }
+};
+```
+
+The function moves the mouse in an imperfect circle with random radius variation, drift, and per-step delay (15–40 ms). This avoids the perfectly uniform movement patterns that bot-detection systems flag.
+
+**Recommendation:** When testing against a new platform for the first time, start with `limit=20` to verify the setup works before requesting large volumes.
+
+## Referer injection
+
+Some platforms validate the `Referer` request header on media CDN requests and return `403` if it is missing or wrong.
+
+- **Pixiv** requires the referer to match the original post URL. SMF sets this automatically per download.
+- **X (Twitter)** requires `Referer: https://x.com/`. The X controller sets this on every file download:
+
+  ```javascript
+  await downloadFile(item.url, dest, `${item.id}.${item.ext}`, {
+      'User-Agent': ua,
+      'Cookie': cookies,
+      'Referer': 'https://x.com/'
+  });
+  ```
+
+The DeviantArt controller sets a full set of fetch-mode headers alongside the referer to match what a real browser sends:
+
+```javascript
+const downloadHeaders = {
+    'User-Agent': ua,
+    'Cookie': cookies,
+    'Referer': 'https://www.deviantart.com/',
+    'Accept': 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8',
+    'sec-fetch-dest': 'image',
+    'sec-fetch-mode': 'no-cors',
+    'sec-fetch-site': 'cross-site'
+};
+```
+
+## Filename sanitization
+
+Post titles are used as folder and file name components. SMF sanitizes them before touching the filesystem using `sanitizeFilename` from `utils/utils.js`:
+
+```javascript
+const sanitizeFilename = (text, limit = 25) => {
+    if (!text) return 'no_text';
+
+    let clean = text
+        .replace(/<[^>]*>/g, '')          // strip HTML tags
+        .replace(/[\\/:*?"<>|]/g, '_')   // replace reserved characters
+        .replace(/[\x00-\x1f\x80-\x9f]/g, '') // strip control characters
+        .trim()
+        .substring(0, limit)              // enforce 25-character limit
+        .replace(/[\s.]+$/, '')           // remove trailing spaces/dots
+        .trim();
+    const reservedNames = /^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])$/i;
+    return reservedNames.test(clean) ? `${clean}_f` : (clean || 'no_text');
+};
+```
+
+Key behaviors:
+
+- **25-character limit** keeps folder names short and avoids path length issues on Windows.
+- **Reserved name handling** — Windows device names (`CON`, `PRN`, `AUX`, `NUL`, `COM1`–`COM9`, `LPT1`–`LPT9`) are forbidden as filenames. SMF appends `_f` to any title that matches one of these names.
+- **HTML stripping** removes any markup that might appear in post captions.
+- **Fallback** — if the text is empty after sanitization, the filename becomes `no_text`.
+
+<Warning>
+  Using SMF to download content from platforms that prohibit scraping or bulk downloading may violate their Terms of Service. Review the ToS of each platform before use. You are solely responsible for ensuring your usage complies with applicable platform rules and laws.
+</Warning>

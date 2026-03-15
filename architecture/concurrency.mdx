@@ -1,0 +1,154 @@
+---
+title: "Concurrency model"
+description: "How SMF manages parallel downloads without overwhelming the network or triggering rate limits."
+---
+
+SMF downloads media files concurrently to reduce total wall-clock time. Rather than using `Promise.all`, which launches every download simultaneously, SMF implements a bounded concurrency pool called `mapLimit` that keeps at most `N` downloads active at any moment.
+
+## The `mapLimit` implementation
+
+```javascript utils/utils.js
+const mapLimit = async (items, limit, fn) => {
+    const results = [];
+    const executing = [];
+    for (const item of items) {
+        const p = Promise.resolve().then(() => fn(item));
+        results.push(p);
+        if (limit <= items.length) {
+            const e = p.then(() => executing.splice(executing.indexOf(e), 1));
+            executing.push(e);
+            if (executing.length >= limit) {
+                await Promise.race(executing);
+            }
+        }
+    }
+    return Promise.all(results);
+}
+```
+
+### How it works
+
+For each item in the input array, `mapLimit`:
+
+1. Creates a promise `p` by calling the worker function `fn(item)`.
+2. Pushes `p` into `results` (preserving order for the final return value).
+3. Registers a cleanup handler: when `p` settles, it removes itself from the `executing` set.
+4. Pushes the cleanup-wrapped promise `e` into `executing`.
+5. If `executing` has reached `limit` active promises, it **awaits `Promise.race(executing)`** — pausing the loop until the fastest in-flight promise settles, which opens a slot.
+6. After the loop, `Promise.all(results)` collects all settled values in original order.
+
+This creates a **sliding window**: as one download finishes, the next item is immediately pulled from the queue, keeping exactly `limit` downloads active without ever overshooting.
+
+### Why not `Promise.all`
+
+`Promise.all(items.map(fn))` launches all tasks simultaneously. For a gallery with hundreds of images this causes:
+
+- **CPU spikes** from opening hundreds of simultaneous write streams
+- **Network saturation** from launching all HTTP requests at once
+- **IP rate-limiting** — platforms like Pixiv detect burst request patterns and block the session
+
+`mapLimit` trades a small amount of throughput for stability and avoids triggering platform-side defenses.
+
+## Controlling concurrency with `THREADS_DOWNLOAD`
+
+The concurrency limit is read from the `THREADS_DOWNLOAD` environment variable, defaulting to `5` if unset:
+
+```javascript
+await mapLimit(tasks, process.env.THREADS_DOWNLOAD || 5, async (task) => {
+    // ...
+});
+```
+
+Set this in your `.env` file:
+
+```bash .env
+THREADS_DOWNLOAD=5
+```
+
+<Tip>
+  For rate-sensitive platforms such as Pixiv, lower `THREADS_DOWNLOAD` to 2 or 3. Pixiv's CDN monitors per-session request rates and will return 403 errors when requests arrive too quickly, even with a valid `PHPSESSID` cookie.
+</Tip>
+
+## Download strategies in the X controller
+
+The X controller exposes two download strategies, selectable via the `method` query parameter.
+
+### `method=normal` — real-time streaming
+
+Downloads are dispatched as media URLs are intercepted from network responses, while the page is still scrolling:
+
+```javascript controllers/xController.js
+if (method === 'normal') {
+    pending.push(page.cookies().then(c =>
+        processDownload(m, c.map(x => `${x.name}=${x.value}`).join('; '), ua)
+    ));
+} else allTasks.push(m);
+```
+
+At the end of scrolling, the controller waits for all in-flight downloads to complete:
+
+```javascript controllers/xController.js
+if (method === 'normal') await Promise.all(pending);
+```
+
+`Promise.all` is safe here because the number of active downloads is naturally bounded by the scroll rate — network responses arrive one page at a time, not all at once.
+
+### `method=batch` — collect-then-download
+
+All media URLs are collected first (`allTasks.push(m)`), then downloaded together with `mapLimit` after scrolling is complete:
+
+```javascript controllers/xController.js
+else {
+    const cookies = (await page.cookies()).map(c => `${c.name}=${c.value}`).join('; ');
+    await mapLimit(
+        allTasks.slice(0, maxItems || allTasks.length),
+        process.env.THREADS_DOWNLOAD || 5,
+        t => processDownload(t, cookies, ua)
+    );
+}
+```
+
+Batch mode is useful when you want deterministic control over concurrency or when the `limit` parameter is set and you only want to download exactly that many items.
+
+## `mapLimit` in the DeviantArt controller
+
+```javascript controllers/deviantartController.js
+const allDownloadedResults = await mapLimit(
+    tasks,
+    process.env.THREADS_DOWNLOAD || 5,
+    async (task) => {
+        try {
+            const headers = { ...downloadHeaders };
+            if (!task.isOriginal) {
+                headers['Sec-Fetch-Dest'] = 'image';
+                headers['Sec-Fetch-Mode'] = 'no-cors';
+            }
+
+            const result = await downloadFile(task.url, task.dest, task.filename, headers);
+            
+            const jitter = Math.floor(Math.random() * 1000) + 500;
+            await new Promise(r => setTimeout(r, jitter));
+
+            return result;
+        } catch (err) {
+            console.error(`⚠️ Error en ${task.filename}: ${err.message}`);
+            return { id: task.filename, status: false, error: err.message };
+        }
+    }
+);
+```
+
+Notice the **per-download jitter** of 500–1500 ms (`Math.floor(Math.random() * 1000) + 500`). DeviantArt's CDN is particularly sensitive to evenly-spaced requests; the random delay breaks up the pattern.
+
+## Platform reference
+
+| Platform | Engine | Download strategy | Recommended `THREADS_DOWNLOAD` |
+|---|---|---|---|
+| X (Twitter) | Puppeteer Stealth | `normal`: real-time; `batch`: mapLimit | 5 |
+| DeviantArt | Puppeteer + hybrid | mapLimit with per-item jitter | 3–5 |
+| Pixiv | REST | mapLimit (metadata: 15; files: `THREADS_DOWNLOAD`) | 2–3 |
+| Pinterest | REST | mapLimit | 5 |
+| Instagram | Puppeteer Stealth | mapLimit | 3–5 |
+| TikTok | Puppeteer Stealth | mapLimit | 5 |
+| Threads | Puppeteer Stealth | mapLimit | 5 |
+| OnlyFans | Puppeteer Stealth | mapLimit | 3–5 |

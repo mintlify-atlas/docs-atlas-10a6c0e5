@@ -1,80 +1,97 @@
 ---
 title: "Quickstart"
-description: "Start building awesome documentation in minutes"
+description: "Get Social Media Fetcher running and download your first media gallery in under 5 minutes."
 ---
 
-## Get started in three steps
+<Steps>
+  <Step title="Clone the repository">
+    ```bash
+    git clone https://github.com/Omarleel/Social-Media-Fetcher.git
+    cd Social-Media-Fetcher
+    ```
+  </Step>
 
-Get your documentation site running locally and make your first customization.
+  <Step title="Install dependencies">
+    ```bash
+    npm install
+    ```
 
-### Step 1: Set up your local environment
+    <Note>
+      The `postinstall` script runs `puppeteer browsers install chrome` automatically after `npm install` completes. This downloads the Chromium browser that Puppeteer uses for browser-automation engines (X, TikTok, Instagram, Threads, DeviantArt, OnlyFans). It may take a minute on first install.
+    </Note>
+  </Step>
 
-<AccordionGroup>
-  <Accordion icon="copy" title="Clone your docs locally">
-    During the onboarding process, you created a GitHub repository with your docs content if you didn't already have one. You can find a link to this repository in your [dashboard](https://dashboard.mintlify.com).
-    
-    To clone the repository locally so that you can make and preview changes to your docs, follow the [Cloning a repository](https://docs.github.com/en/repositories/creating-and-managing-repositories/cloning-a-repository) guide in the GitHub docs.
-  </Accordion>
-  <Accordion icon="rectangle-terminal" title="Start the preview server">
-    1. Install the Mintlify CLI: `npm i -g mint`
-    2. Navigate to your docs directory and run: `mint dev`
-    3. Open `http://localhost:3000` to see your docs live!
-    
-    <Tip>Your preview updates automatically as you edit files.</Tip>
-  </Accordion>
-</AccordionGroup>
+  <Step title="Configure your environment">
+    Copy the example file and fill in the required values:
 
-### Step 2: Deploy your changes
+    ```bash
+    cp .env.example .env
+    ```
 
-<AccordionGroup>
-  <Accordion icon="github" title="Install our GitHub app">
-    Install the Mintlify GitHub app from your [dashboard](https://dashboard.mintlify.com/settings/organization/github-app).
-    
-    Our GitHub app automatically deploys your changes to your docs site, so you don't need to manage deployments yourself.
-</Accordion>
-<Accordion icon="palette" title="Update your site name and colors">
-    For a first change, let's update the name and colors of your docs site.
+    At minimum, set the three server variables and at least one platform token. For example, to use the X (Twitter) engine:
 
-    1. Open `docs.json` in your editor.
-    2. Change the `"name"` field to your project name.
-    3. Update the `"colors"` to match your brand.
-    4. Save and see your changes instantly at `http://localhost:3000`.
+    ```env .env
+    PORT=3000
+    DIR_STORAGE=./storage
+    THREADS_DOWNLOAD=5
 
-    <Tip>Try changing the primary color to see an immediate difference!</Tip>
-  </Accordion>
-</AccordionGroup>
+    X_AUTH_TOKEN=your_auth_token_cookie_value
+    ```
 
-### Step 3: Go live
+    <Tip>
+      On low-resource machines (limited RAM or CPU), set `THREADS_DOWNLOAD=3` to keep concurrent downloads manageable and avoid network saturation or thermal throttling.
+    </Tip>
 
-<Accordion icon="rocket" title="Publish your docs">
-  1. Commit and push your changes.
-  2. Your docs will update and be live in moments!
-</Accordion>
+    See [Configuration](/configuration) for a full list of all environment variables and instructions on finding your authentication cookies.
+  </Step>
 
-## Next steps
+  <Step title="Start the server">
+    ```bash
+    npm start
+    ```
 
-Now that you have your docs running, explore these key features:
+    Or directly:
 
-<CardGroup cols={2}>
+    ```bash
+    node app.js
+    ```
 
-<Card title="Write Content" icon="pen-to-square" href="/essentials/markdown">
-  Learn MDX syntax and start writing your documentation.
-</Card>
+    The server listens on the port defined in `PORT` (default `3000`). You should see:
 
-<Card title="Customize style" icon="palette" href="/essentials/settings">
-  Make your docs match your brand perfectly.
-</Card>
+    ```
+    🚀 Servidor SocialMediaFetcher corriendo en puerto 3000
+    ```
+  </Step>
 
-<Card title="Add code examples" icon="square-code" href="/essentials/code">
-  Include syntax-highlighted code blocks.
-</Card>
+  <Step title="Make your first request">
+    Download the 10 most recent media items from an X (Twitter) profile:
 
-<Card title="API documentation" icon="code" href="/api-reference/introduction">
-  Auto-generate API docs from OpenAPI specs.
-</Card>
+    ```bash
+    curl "http://localhost:3000/x/get-all-media?username=elonmusk&limit=10"
+    ```
 
-</CardGroup>
+    A successful response looks like this:
 
-<Note>
-  **Need help?** See our [full documentation](https://mintlify.com/docs) or join our [community](https://mintlify.com/community).
-</Note>
+    ```json
+    {
+      "status": "success",
+      "profile": {
+        "username": "elonmusk",
+        "name": "Elon Musk",
+        "avatar": "https://pbs.twimg.com/profile_images/.../photo.jpg"
+      },
+      "total_requested": 10,
+      "total_processed": 10,
+      "downloads": [
+        {
+          "url": "https://pbs.twimg.com/media/...",
+          "filename": "photo.jpg",
+          "path": "./storage/x/elonmusk/images/photo.jpg"
+        }
+      ]
+    }
+    ```
+
+    Downloaded files are saved to `DIR_STORAGE/x/elonmusk/` on disk.
+  </Step>
+</Steps>

@@ -1,0 +1,95 @@
+---
+title: "Pinterest"
+description: "Download all pins (images and videos) from a Pinterest user's created boards."
+---
+
+## Endpoint
+
+```
+GET /pinterest/get-all-media
+```
+
+## Authentication
+
+Set the following variable in your `.env` file:
+
+| Variable | Description |
+|---|---|
+| `PINTEREST_COOKIE` | Full cookie string from a logged-in Pinterest session |
+
+<Note>
+  The cookie string is sent as a `Cookie` header on all API requests and is also used for the pin detail page requests that extract video URLs.
+</Note>
+
+## Query parameters
+
+<ParamField query="username" type="string" required>
+  The Pinterest username of the account.
+</ParamField>
+
+<ParamField query="limit" type="integer">
+  Maximum number of media items to collect across all paginated results. Includes the profile picture in the count. Omit to collect all available pins.
+</ParamField>
+
+## curl example
+
+```bash
+curl "http://localhost:3000/pinterest/get-all-media?username=examplepinner&limit=100"
+```
+
+## Response example
+
+```json
+{
+  "status": true,
+  "profile": {
+    "id": "556677889900",
+    "username": "examplepinner",
+    "nickname": "Example Pinner",
+    "picture": "https://i.pinimg.com/originals/ab/cd/ef/abcdef1234567890.jpg",
+    "header": "",
+    "url": "https://www.pinterest.com/examplepinner/"
+  },
+  "total_requested": 100,
+  "total_proccessed": 100,
+  "files": [
+    { "status": "downloaded", "fileName": "profile_picture.jpg" },
+    { "status": "downloaded", "fileName": "998877665544.jpg" },
+    { "status": "downloaded", "fileName": "887766554433.mp4" },
+    { "status": "exists", "fileName": "776655443322.jpg" }
+  ]
+}
+```
+
+<Note>
+  The Pinterest controller uses `files` instead of `downloads` as the key for the file list in the response body.
+</Note>
+
+<Note>
+  The response key is `total_proccessed` (with a double `c`) — this is the field name used by the Pinterest controller.
+</Note>
+
+## Notes
+
+<Note>
+  Pinterest uses cursor-based pagination. SMF passes the `bookmark` value returned by each page of results as the cursor for the next request. Pagination continues until the bookmark is `"-end-"` or no pins are returned.
+</Note>
+
+<Note>
+  Both images and videos are supported. For video pins (`is_video: true` or pins with a non-zero `story_pin_data.total_video_duration`), SMF fetches the individual pin page and extracts the highest-resolution `v1.pinimg.com` MP4 URL via HTML parsing.
+</Note>
+
+<Tip>
+  Profile pictures are sourced from the `native_creator` or `pinner` field of the first pin and saved as `profile_picture.jpg`. The URL is upgraded to the originals CDN path automatically.
+</Tip>
+
+<Warning>
+  A 800 ms delay is applied between paginated API requests to avoid triggering Pinterest rate limits.
+</Warning>
+
+## Error codes
+
+| HTTP status | `error` value | Cause |
+|---|---|---|
+| 400 | `"Username is required"` | The `username` query parameter was not provided. |
+| 500 | Any message | Network failure, invalid cookie, or unexpected Pinterest API response. Verify that `PINTEREST_COOKIE` is set and not expired. |

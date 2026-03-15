@@ -1,0 +1,96 @@
+---
+title: "Pixiv"
+description: "Download illustrations and manga from a Pixiv user by their numeric user ID."
+---
+
+## Endpoint
+
+```
+GET /pixiv/get-all-media
+```
+
+## Authentication
+
+Set the following variable in your `.env` file:
+
+| Variable | Description |
+|---|---|
+| `PIXIV_PHPSESSID` | Value of the `PHPSESSID` cookie from a logged-in Pixiv session |
+
+<Note>
+  The `PHPSESSID` cookie is injected as a `Cookie` header on all API requests. It is also used as a `Referer` header to prevent 403 errors when downloading original image files from Pixiv's CDN.
+</Note>
+
+## Query parameters
+
+<ParamField query="userId" type="string" required>
+  The Pixiv **numeric user ID** of the account. This is the number found in the URL: `pixiv.net/en/users/{userId}`. This is not the display username.
+</ParamField>
+
+<ParamField query="limit" type="integer">
+  Maximum number of works (illustrations or manga entries) to process. Omit to process all available works.
+</ParamField>
+
+<ParamField query="mediaType" type="string">
+  Comma-separated list of content types to include. Accepted values: `illust`, `manga`. Defaults to both (`illust,manga`) if omitted or set to `null`.
+</ParamField>
+
+## curl example
+
+```bash
+curl "http://localhost:3000/pixiv/get-all-media?userId=12345678&limit=100&mediaType=illust"
+```
+
+## Response example
+
+```json
+{
+  "status": true,
+  "profile": {
+    "id": "12345678",
+    "username": "pixiv_account",
+    "nickname": "Pixel Artist",
+    "picture": "https://i.pximg.net/user-profile/img/2023/01/01/12/00/00/12345678_170.jpg",
+    "header": "",
+    "url": "https://www.pixiv.net/en/users/12345678"
+  },
+  "total_requested": 100,
+  "total_processed": 247,
+  "downloads": [
+    { "status": "downloaded", "fileName": "profile_picture.jpg" },
+    { "status": "downloaded", "fileName": "98765432_p0.png" },
+    { "status": "downloaded", "fileName": "98765432_p1.png" },
+    { "status": "exists", "fileName": "87654321_p0.jpg" }
+  ]
+}
+```
+
+<Note>
+  `total_processed` reflects the total number of individual image files downloaded, which is typically higher than `total_requested` because manga posts contain multiple pages.
+</Note>
+
+## Notes
+
+<Note>
+  Work IDs are fetched in chunks of 48 using the Pixiv profile API. Each chunk is resolved to full metadata in a single batched request before download tasks are queued.
+</Note>
+
+<Note>
+  For manga-type works, every page in the set is downloaded as a separate file named `{workId}_p{pageIndex}.{ext}`. A 30-page manga entry produces 30 download tasks.
+</Note>
+
+<Tip>
+  All download requests include an artwork-specific `Referer` header (`https://www.pixiv.net/en/artworks/{workId}`) in addition to the session cookie. This is required to avoid 403 responses from Pixiv's image CDN.
+</Tip>
+
+<Warning>
+  `userId` is the numeric ID, not the Pixiv display username or account name. Using a non-numeric string will result in an API error from Pixiv.
+</Warning>
+
+## Error codes
+
+| HTTP status | `error` value | Cause |
+|---|---|---|
+| 400 | `"userId is required"` | The `userId` query parameter was not provided. |
+| 500 | `"User not found or Private"` | Pixiv returned an error for the given `userId`. The account may not exist or may be set to private. |
+| 500 | Any other message | Network failure or unexpected Pixiv API response. |

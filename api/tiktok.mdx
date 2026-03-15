@@ -1,0 +1,89 @@
+---
+title: "TikTok"
+description: "Download all videos and the profile avatar from a TikTok creator."
+---
+
+## Endpoint
+
+```
+GET /tiktok/get-all-media
+```
+
+## Authentication
+
+No `.env` authentication variables are required for TikTok. SMF uses a headless browser with a spoofed user agent to access the public API (`/api/post/item_list/`) that TikTok exposes during page load.
+
+<Note>
+  Because no session cookies are injected, only publicly visible content from non-restricted accounts can be downloaded.
+</Note>
+
+## Query parameters
+
+<ParamField query="username" type="string" required>
+  The TikTok username of the creator (with or without `@`). The `@` prefix is stripped automatically.
+</ParamField>
+
+<ParamField query="limit" type="integer">
+  Maximum number of media items to collect (videos plus the profile picture). Omit to collect all available content.
+</ParamField>
+
+## curl example
+
+```bash
+curl "http://localhost:3000/tiktok/get-all-media?username=examplecreator&limit=30"
+```
+
+## Response example
+
+```json
+{
+  "status": true,
+  "profile": {
+    "id": "6987654321012345678",
+    "username": "examplecreator",
+    "nickname": "Example Creator",
+    "picture": "https://p16-sign-va.tiktokcdn.com/musically-maliva-obj/avatar_large.jpeg",
+    "header": "",
+    "url": "https://www.tiktok.com/@examplecreator"
+  },
+  "total_requested": 30,
+  "total_proccessed": 30,
+  "results": [
+    { "status": "downloaded", "fileName": "profile_picture.jpg" },
+    { "status": "downloaded", "fileName": "7112233445566778899.mp4" },
+    { "status": "exists", "fileName": "7099887766554433221.mp4" }
+  ]
+}
+```
+
+<Note>
+  The TikTok controller uses `results` instead of `downloads` as the key for the file list in the response body.
+</Note>
+
+<Note>
+  The response key is `total_proccessed` (with a double `c`) — this is the field name used by the TikTok controller.
+</Note>
+
+## Notes
+
+<Note>
+  Videos are downloaded without a watermark by using the highest-bitrate `PlayAddr` URL from the `bitrateInfo` array in TikTok's item list API response, with `downloadAddr` as a fallback.
+</Note>
+
+<Note>
+  The creator's profile avatar is downloaded as `profile_picture.jpg` and included as the first item in the task queue. It counts toward the `limit` if one is specified.
+</Note>
+
+<Note>
+  Scrolling stops automatically when TikTok's `hasMore` field is `false`, or when the `[data-e2e="user-post-item-list-no-more"]` element appears in the DOM. The scroll loop also exits after 3 stalled cycles (no page height change).
+</Note>
+
+<Tip>
+  All video files are saved to a `videos/` subfolder and the profile picture is saved to an `images/` subfolder within the user's storage directory.
+</Tip>
+
+## Error codes
+
+| HTTP status | `error` value | Cause |
+|---|---|---|
+| 500 | Any message | Browser launch failure or network error. Verify the username exists and is publicly accessible. |

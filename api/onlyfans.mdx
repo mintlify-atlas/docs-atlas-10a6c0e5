@@ -1,0 +1,89 @@
+---
+title: "OnlyFans"
+description: "Download all media from an OnlyFans creator using a persistent browser profile."
+---
+
+## Endpoint
+
+```
+GET /onlyfans/get-all-media
+```
+
+## Authentication
+
+OnlyFans does not use `.env` cookie variables. Authentication is handled through a **persistent Puppeteer browser profile** stored at `config/of_profile/` within the project directory.
+
+<Warning>
+  The first time you run this endpoint, a visible browser window will open and wait for you to log in manually (up to 5 minutes). Once logged in, the session is saved to the profile directory and reused automatically on subsequent requests.
+</Warning>
+
+<Tip>
+  After the initial login, the browser profile persists the `auth_id` cookie. Subsequent requests will skip the manual login step and proceed automatically.
+</Tip>
+
+## Query parameters
+
+<ParamField query="username" type="string" required>
+  The OnlyFans username of the creator (without `@`).
+</ParamField>
+
+<ParamField query="limit" type="integer">
+  Maximum number of posts to collect. When reached, scrolling stops and no further posts are fetched. Omit to collect all posts.
+</ParamField>
+
+## curl example
+
+```bash
+curl "http://localhost:3000/onlyfans/get-all-media?username=creativestudio&limit=50"
+```
+
+## Response example
+
+```json
+{
+  "status": true,
+  "profile": {
+    "id": "12345678",
+    "username": "creativestudio",
+    "nickname": "Creative Studio",
+    "picture": "https://public.onlyfans.com/files/thumbs/c144/a/ab/abc/abcdef1234567890.jpg",
+    "header": "https://public.onlyfans.com/files/thumbs/c144/h/he/hea/header_image.jpg",
+    "url": "https://onlyfans.com/creativestudio"
+  },
+  "total_requested": 50,
+  "total_proccessed": 52,
+  "downloads": [
+    { "status": "downloaded", "fileName": "profile_picture.jpg" },
+    { "status": "downloaded", "fileName": "header_picture.jpg" },
+    { "status": "downloaded", "fileName": "98765432_p0.jpg" },
+    { "status": "exists", "fileName": "87654321_p0.mp4" }
+  ]
+}
+```
+
+<Note>
+  The response key is `total_proccessed` (with a double `c`) — this is the field name used by the OnlyFans controller.
+</Note>
+
+## Notes
+
+<Note>
+  SMF intercepts network responses in real-time as the browser navigates the creator's `/media` page. The user's numeric ID and profile metadata (avatar, header, display name) are captured from the `/api2/v2/users/{username}` response without any additional API calls.
+</Note>
+
+<Note>
+  Pagination is handled with smart scrolling. SMF reads the `hasMore` property from each `/posts/medias` API response and stops scrolling automatically when no more content is available or the `limit` is reached.
+</Note>
+
+<Tip>
+  Media files are organised into per-post subdirectories named `{date}_{postId}_{title}`, each split into `images/` and `videos/` subfolders.
+</Tip>
+
+## Error codes
+
+| HTTP status | `error` value | Cause |
+|---|---|---|
+| 400 | `"username query param is required"` | The `username` query parameter was not provided. |
+| 500 | `"Timeout: No iniciaste sesión a tiempo."` | Manual login was not completed within the 5-minute window. |
+| 500 | `"Timeout capturando ID"` | The user profile API response was not intercepted within 30 seconds of page load. |
+| 500 | Any other message | Browser launch failure or network error. |

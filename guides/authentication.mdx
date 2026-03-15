@@ -1,0 +1,182 @@
+---
+title: "Authentication guide"
+description: "How to obtain and configure session cookies for each supported platform."
+---
+
+SMF does not use OAuth or a dedicated app account. Instead, it authenticates as **you** — it injects your own browser session cookies into every request, so platforms see traffic as coming from your logged-in account.
+
+This means you must extract cookies from your browser after logging in manually, then paste them into your `.env` file.
+
+## General process
+
+1. Open Chrome or Firefox and log in to the target platform.
+2. Press `F12` to open DevTools.
+3. Go to the **Application** tab (Chrome) or **Storage** tab (Firefox).
+4. Expand **Cookies** in the left sidebar and select the platform's domain.
+5. Find the cookie by name and copy its **Value**.
+6. Paste the value into the corresponding variable in your `.env` file.
+
+## Platform cookies
+
+<Tabs>
+  <Tab title="X (Twitter)">
+    **Domain:** `x.com`
+
+    | Cookie name | `.env` variable | Notes |
+    |-------------|-----------------|-------|
+    | `auth_token` | `X_AUTH_TOKEN` | Main session token |
+
+    ```env
+    X_AUTH_TOKEN=your_auth_token_value_here
+    ```
+
+    SMF injects this cookie directly via Puppeteer before navigating to the user's media page:
+
+    ```javascript
+    await page.setCookie(
+        { name: 'auth_token', value: process.env.X_AUTH_TOKEN, domain: '.x.com' },
+    );
+    ```
+  </Tab>
+
+  <Tab title="Pixiv">
+    **Domain:** `pixiv.net`
+
+    | Cookie name | `.env` variable | Notes |
+    |-------------|-----------------|-------|
+    | `PHPSESSID` | `PIXIV_PHPSESSID` | PHP session identifier |
+
+    ```env
+    PIXIV_PHPSESSID=your_phpsessid_value_here
+    ```
+
+    Pixiv also validates the `Referer` header on image CDN requests. SMF handles this automatically — see the [Security guide](/guides/security) for details.
+  </Tab>
+
+  <Tab title="Pinterest">
+    **Domain:** `pinterest.com`
+
+    | Cookie name | `.env` variable | Notes |
+    |-------------|-----------------|-------|
+    | `_pinterest_sess` | `PINTEREST_COOKIE` | Full session cookie value |
+
+    ```env
+    PINTEREST_COOKIE=your_pinterest_sess_value_here
+    ```
+  </Tab>
+
+  <Tab title="Instagram">
+    **Domain:** `instagram.com`
+
+    | Cookie name | `.env` variable | Notes |
+    |-------------|-----------------|-------|
+    | `sessionid` | `INSTA_SESSIONID` | Session identifier |
+    | `csrftoken` | `INSTA_CSRF_TOKEN` | CSRF protection token |
+
+    ```env
+    INSTA_SESSIONID=your_sessionid_value_here
+    INSTA_CSRF_TOKEN=your_csrftoken_value_here
+    ```
+
+    Both cookies are required. Instagram's GraphQL endpoints reject requests missing a valid CSRF token.
+  </Tab>
+
+  <Tab title="Threads">
+    **Domain:** `threads.net`
+
+    | Cookie name | `.env` variable | Notes |
+    |-------------|-----------------|-------|
+    | `sessionid` | `THREADS_SESSIONID` | Session identifier |
+    | `csrftoken` | `THREADS_CSRF_TOKEN` | CSRF protection token |
+
+    ```env
+    THREADS_SESSIONID=your_sessionid_value_here
+    THREADS_CSRF_TOKEN=your_csrftoken_value_here
+    ```
+  </Tab>
+
+  <Tab title="DeviantArt">
+    **Domain:** `deviantart.com`
+
+    DeviantArt requires two groups of cookies: standard authentication cookies and PerimeterX anti-bot cookies.
+
+    **Standard authentication:**
+
+    | Cookie name | `.env` variable | Notes |
+    |-------------|-----------------|-------|
+    | `auth` | `DA_AUTH` | Primary auth token |
+    | `auth_secure` | `DA_AUTH_SECURE` | Secure auth token |
+    | `userinfo` | `DA_USERINFO` | User info payload |
+
+    **PerimeterX anti-bot:**
+
+    | Cookie name | `.env` variable | Notes |
+    |-------------|-----------------|-------|
+    | `_px` | `DA_PX` | Long-duration PerimeterX token |
+    | `_pxvid` | `DA_PXVID` | PerimeterX visitor ID |
+    | `pxcts` | `DA_PXCTS` | PerimeterX client timestamp |
+
+    ```env
+    # Standard auth
+    DA_AUTH=your_auth_value_here
+    DA_AUTH_SECURE=your_auth_secure_value_here
+    DA_USERINFO=your_userinfo_value_here
+
+    # PerimeterX anti-bot
+    DA_PX=your_px_value_here
+    DA_PXVID=your_pxvid_value_here
+    DA_PXCTS=your_pxcts_value_here
+    ```
+
+    <Note>
+      The PerimeterX cookies (`DA_PX`, `DA_PXVID`, `DA_PXCTS`) are optional but strongly recommended. Without them, DeviantArt may present CAPTCHAs or block headless browser requests. `DA_PX` in particular is a long-duration cookie that significantly reduces bot detection triggers.
+    </Note>
+
+    If the standard auth cookies are missing or invalid, SMF falls back to unauthenticated HTML scraping. See the [Session setup guide](/guides/session-setup) for details on how the dual-path authentication works.
+  </Tab>
+
+  <Tab title="OnlyFans">
+    OnlyFans does **not** use `.env` cookie variables. It relies on a persistent Chrome browser profile stored on disk, which survives across restarts.
+
+    See the [Session setup guide](/guides/session-setup) for full setup instructions.
+  </Tab>
+</Tabs>
+
+## Full `.env` reference
+
+Here is the complete `.env.example` showing all authentication variables:
+
+```env
+PORT=3000
+DIR_STORAGE=./storage
+THREADS_DOWNLOAD=5
+
+PINTERESST_COOKIE=
+
+INSTA_SESSIONID=
+INSTA_CSRF_TOKEN=
+
+THREADS_SESSIONID=
+THREADS_CSRF_TOKEN=
+
+X_AUTH_TOKEN=
+
+PIXIV_PHPSESSID=
+
+# --- DEVIANTART AUTH ---
+DA_AUTH=
+DA_AUTH_SECURE=
+DA_USERINFO=
+# --- DEVIANTART ANTI-BOT (PerimeterX) ---
+DA_PX=
+DA_PXVID=
+DA_PXCTS=
+```
+
+<Warning>
+  Your `.env` file contains live, authenticated session cookies. Anyone with these values can act as you on the respective platforms. Never commit `.env` to version control, share it, or include it in logs. The repository's `.gitignore` already excludes it.
+</Warning>
+
+<Note>
+  Cookie lifetimes vary by platform. If SMF returns `401` or `403` errors, your session has likely expired. Log in again in your browser and re-extract the affected cookies.
+</Note>

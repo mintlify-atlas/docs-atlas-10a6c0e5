@@ -1,0 +1,155 @@
+---
+title: "Configuration"
+description: "All environment variables and runtime settings for Social Media Fetcher."
+---
+
+All configuration is done through a single `.env` file in the project root. Copy `.env.example` to `.env` and fill in the values before starting the server. No other config files are required.
+
+## Server settings
+
+<ParamField path="PORT" type="number" default="3000">
+  The port the Express server listens on.
+</ParamField>
+
+<ParamField path="DIR_STORAGE" type="string" default="./storage">
+  Root directory where downloaded media is saved. SMF creates platform and username subdirectories automatically. Can be an absolute or relative path.
+</ParamField>
+
+<ParamField path="THREADS_DOWNLOAD" type="number" default="5">
+  Maximum number of concurrent file downloads. SMF uses a promise-pool (`mapLimit`) to keep exactly this many downloads active at once. Lower this value on machines with limited RAM or network bandwidth.
+</ParamField>
+
+## Platform authentication tokens
+
+SMF authenticates with each platform by injecting session cookies directly into its HTTP or Puppeteer requests. You extract these cookies from a logged-in browser session.
+
+**How to find cookies in your browser:**
+1. Log in to the platform in Chrome or Firefox.
+2. Open DevTools (`F12` or `Cmd+Option+I`).
+3. Go to **Application** (Chrome) or **Storage** (Firefox) > **Cookies**.
+4. Select the platform domain and copy the value of the relevant cookie.
+
+### X (Twitter)
+
+<ParamField path="X_AUTH_TOKEN" type="string">
+  The `auth_token` cookie from `x.com`. Log in to X, then find `auth_token` under `https://x.com` in the Cookies panel.
+</ParamField>
+
+### Pixiv
+
+<ParamField path="PIXIV_PHPSESSID" type="string">
+  The `PHPSESSID` cookie from `pixiv.net`. Log in to Pixiv, then find `PHPSESSID` under `https://www.pixiv.net`.
+</ParamField>
+
+### Pinterest
+
+<ParamField path="PINTEREST_COOKIE" type="string">
+  The `_pinterest_sess` cookie value from `pinterest.com`. Log in to Pinterest, then find `_pinterest_sess` under `https://www.pinterest.com`.
+</ParamField>
+
+### Instagram
+
+<ParamField path="INSTA_SESSIONID" type="string">
+  The `sessionid` cookie from `instagram.com`.
+</ParamField>
+
+<ParamField path="INSTA_CSRF_TOKEN" type="string">
+  The `csrftoken` cookie from `instagram.com`. Both cookies must be from the same logged-in session.
+</ParamField>
+
+### Threads
+
+<ParamField path="THREADS_SESSIONID" type="string">
+  The `sessionid` cookie from `threads.net`.
+</ParamField>
+
+<ParamField path="THREADS_CSRF_TOKEN" type="string">
+  The `csrftoken` cookie from `threads.net`. Both cookies must be from the same logged-in session.
+</ParamField>
+
+### DeviantArt
+
+DeviantArt requires both standard auth cookies and PerimeterX anti-bot cookies. All six values must be present for requests to succeed.
+
+<ParamField path="DA_AUTH" type="string">
+  The `auth` cookie from `deviantart.com`.
+</ParamField>
+
+<ParamField path="DA_AUTH_SECURE" type="string">
+  The `auth_secure` cookie from `deviantart.com`.
+</ParamField>
+
+<ParamField path="DA_USERINFO" type="string">
+  The `userinfo` cookie from `deviantart.com`.
+</ParamField>
+
+<ParamField path="DA_PX" type="string">
+  The `_px` cookie from `deviantart.com`. This is the long-duration PerimeterX cookie used for anti-bot bypass. It has a longer expiry than the other cookies but will still expire; re-extract it when requests start failing.
+</ParamField>
+
+<ParamField path="DA_PXVID" type="string">
+  The `_pxvid` cookie from `deviantart.com`. Part of the PerimeterX fingerprint.
+</ParamField>
+
+<ParamField path="DA_PXCTS" type="string">
+  The `pxcts` cookie from `deviantart.com`. Part of the PerimeterX fingerprint.
+</ParamField>
+
+<Warning>
+  Authentication cookies expire. If SMF starts returning `401` or `403` errors for a platform, the session has expired. Log back in to the platform in your browser, re-extract the relevant cookies, update your `.env` file, and restart the server.
+</Warning>
+
+## Complete `.env` example
+
+<CodeGroup>
+
+```env .env
+PORT=3000
+DIR_STORAGE=./storage
+THREADS_DOWNLOAD=5
+
+PINTEREST_COOKIE=
+
+INSTA_SESSIONID=
+INSTA_CSRF_TOKEN=
+
+THREADS_SESSIONID=
+THREADS_CSRF_TOKEN=
+
+X_AUTH_TOKEN=
+
+PIXIV_PHPSESSID=
+
+# --- DEVIANTART AUTH ---
+DA_AUTH=
+DA_AUTH_SECURE=
+DA_USERINFO=
+# --- DEVIANTART ANTI-BOT (PerimeterX) ---
+DA_PX=
+DA_PXVID=
+DA_PXCTS=
+```
+
+</CodeGroup>
+
+## Storage layout
+
+SMF saves all downloaded files under `DIR_STORAGE`, organized by platform and username:
+
+```
+./storage/
+├── x/
+│   └── elonmusk/
+│       ├── images/
+│       └── videos/
+├── instagram/
+│   └── username/
+│       ├── images/
+│       └── videos/
+└── deviantart/
+    └── username/
+        ├── images/
+        └── videos/
+```
+
+SMF creates the platform directory, the username subdirectory, and any media-type subfolders (such as `images/` and `videos/`) automatically on first run. You do not need to create these directories manually.

@@ -1,0 +1,94 @@
+---
+title: "Threads"
+description: "Download all media from a Threads user, including spoiler and hidden content."
+---
+
+## Endpoint
+
+```
+GET /threads/get-all-media
+```
+
+## Authentication
+
+Set the following variables in your `.env` file:
+
+| Variable | Description |
+|---|---|
+| `THREADS_SESSIONID` | Value of the `sessionid` cookie from a logged-in Threads session |
+| `THREADS_CSRF_TOKEN` | Value of the `csrftoken` cookie from a logged-in Threads session |
+
+<Note>
+  Both cookies are injected into the browser before navigation. They are set on the `.threads.com` domain.
+</Note>
+
+## Query parameters
+
+<ParamField query="username" type="string" required>
+  The Threads username of the account (with or without `@`). The `@` prefix is stripped automatically.
+</ParamField>
+
+<ParamField query="limit" type="integer">
+  Maximum number of media items to collect. Omit to collect all available content.
+</ParamField>
+
+## curl example
+
+```bash
+curl "http://localhost:3000/threads/get-all-media?username=examplethreads&limit=60"
+```
+
+## Response example
+
+```json
+{
+  "status": true,
+  "profile": {
+    "id": "11223344556",
+    "username": "examplethreads",
+    "nickname": "Example Threads",
+    "picture": "https://scontent.cdninstagram.com/v/t51.2885-19/example_profile.jpg",
+    "header": "",
+    "url": "https://www.threads.net/@examplethreads"
+  },
+  "total_requested": 60,
+  "total_proccessed": 60,
+  "downloads": [
+    { "status": "downloaded", "fileName": "Abc1234567890.jpg" },
+    { "status": "downloaded", "fileName": "Def0987654321.mp4" },
+    { "status": "exists", "fileName": "Ghi5566778899.jpg" }
+  ]
+}
+```
+
+<Note>
+  The response key is `total_proccessed` (with a double `c`) — this is the field name used by the Threads controller.
+</Note>
+
+## Notes
+
+<Note>
+  SMF intercepts GraphQL (`/graphql/query`) and REST (`/api/v1/`) responses during scrolling to extract media URLs and profile metadata. Profile information is sourced from the `user.full_name`, `user.username`, and `user.profile_pic_url` fields in these responses.
+</Note>
+
+<Note>
+  In addition to intercepted network responses, SMF scans inline `<script data-sjs>` tags in the page HTML to detect spoiler and hidden content. This scan runs on initial page load and after each scroll step.
+</Note>
+
+<Note>
+  The profile picture is extracted from the page's `<meta>` tags as a supplementary source and added to the download queue alongside content media.
+</Note>
+
+<Note>
+  Stagnation detection stops the scroll loop after **3 consecutive scroll iterations** with no new media items found.
+</Note>
+
+<Tip>
+  Media files are organised into `images/` and `videos/` subfolders within the user's storage directory.
+</Tip>
+
+## Error codes
+
+| HTTP status | `error` value | Cause |
+|---|---|---|
+| 500 | Any message | Browser launch failure, authentication error, or network problem. Check that `THREADS_SESSIONID` and `THREADS_CSRF_TOKEN` are set and valid. |

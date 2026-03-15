@@ -1,0 +1,202 @@
+---
+title: "Platform engines"
+description: "Deep dive into Puppeteer and REST engine implementations per platform."
+---
+
+SMF uses two engine types. Puppeteer engines are required for platforms that enforce JavaScript-rendered authentication, rely on session cookies that must be set in a real browser context, or actively fingerprint HTTP clients. REST engines are used when a platform exposes a JSON API that accepts a session cookie or token directly, making a full browser unnecessary.
+
+## Puppeteer Stealth engines
+
+All Puppeteer-based controllers use [`puppeteer-extra`](https://github.com/berstend/puppeteer-extra) with the stealth plugin to suppress the most common headless Chrome signals.
+
+### Stealth setup
+
+```javascript controllers/xController.js
+const puppeteer = require('puppeteer-extra');
+const StealthPlugin = require('puppeteer-extra-plugin-stealth');
+puppeteer.use(StealthPlugin());
+```
+
+The browser is launched with `headless: 'new'` (Chrome's updated headless mode, which shares more code with the full browser and is harder to detect) and `--no-sandbox` for containerized environments:
+
+```javascript controllers/xController.js
+browser = await puppeteer.launch({ 
+    headless: 'new', 
+    args: ['--no-sandbox', '--disable-setuid-sandbox'] 
+});
+```
+
+### Network response interception
+
+The X controller avoids scraping the DOM entirely. Instead, it intercepts the XHR responses that the page itself makes to X's internal API and parses the JSON directly:
+
+```javascript controllers/xController.js
+page.on('response', async (response) => {
+    const url = response.url();
+    if (url.includes('UserTweets') || url.includes('UserMedia')) {
+        const data = await response.json().catch(() => null);
+        if (data) {
+            const { medias, user } = extractMediaFromXJson(data);
+            if (!userProfile && user) {
+                userProfile = new Profile({
+                    id: user.id,
+                    nickname: user.nickname || user.name,
+                    username: username, 
+                    picture: user.picture || user.profile_image_url_https,
+                    url: `https://x.com/${username.replace('@', '')}`
+                });
+            }
+            const hasNewItems = handleMedias(medias);
+
+            if (hasNewItems && resolveScroll) {
+                setTimeout(() => resolveScroll(true), 500);
+            }
+        }
+    }
+});
+```
+
+`extractMediaFromXJson` (in `utils/x.js`) walks the nested response tree recursively, collecting image and video URLs with deduplication.
+
+### Stagnation detection
+
+Infinite-scroll feeds do not always signal when they are exhausted. SMF tracks whether new items are discovered after each scroll and halts when stagnation persists across `MAX_STAGNATION` consecutive scrolls:
+
+```javascript controllers/xController.js
+let stagnationRetries = 0;
+const MAX_STAGNATION = 3;
+
+// inside the scroll loop:
+if (seenIds.size === itemsBeforeScroll) {
+    stagnationRetries++;
+    console.log(`[!] Sin contenido nuevo detectado (${stagnationRetries}/${MAX_STAGNATION})`);
+    if (stagnationRetries >= MAX_STAGNATION) {
+        console.log("[->] Límite de scroll alcanzado o bloqueo de sesión. Finalizando...");
+        break; 
+    }
+} else {
+    stagnationRetries = 0;
+}
+```
+
+Additionally, if `document.body.scrollHeight` does not change across 5 consecutive scroll attempts (`scrollRetries < 5`), the loop exits — this catches feeds where the page height stabilizes before all API data is loaded.
+
+### Anti-detection mouse movement
+
+Before each scroll, `moveMouseInCircle` from `utils/utils.js` moves the Puppeteer mouse cursor along a slightly irregular circle path. The radius and timing are randomized to avoid producing machine-perfect motion curves:
+
+```javascript utils/utils.js
+const moveMouseInCircle = async (p) => {
+    const { w, h } = await p.evaluate(() => ({ w: window.innerWidth, h: window.innerHeight }));
+
+    const centerX = (w / 2) + (Math.random() * 20 - 10);
+    const centerY = (h / 2) + (Math.random() * 20 - 10);
+    
+    const baseRadius = 100;
+    const steps = 40;
+
+    for (let i = 0; i <= steps; i++) {
+        const drift = Math.sin(i * 0.5) * 0.1; 
+        const angle = ((i / steps) * (Math.PI * 2)) + drift;
+
+        const irregularRadius = baseRadius + (Math.random() * 15 - 7.5) + (Math.cos(i * 0.3) * 10);
+
+        const x = centerX + irregularRadius * Math.cos(angle);
+        const y = centerY + irregularRadius * Math.sin(angle);
+
+        await p.mouse.move(x, y);
+        
+        const delay = 15 + Math.random() * 25;
+        await new Promise(r => setTimeout(r, delay));
+    }
+};
+```
+
+Key details:
+- **Jitter on center**: the center point is offset by up to ±10 px in both axes so repeated calls don't trace the same circle.
+- **Irregular radius**: each step adds `Math.random() * 15 - 7.5` and a cosine wave so the path is never a perfect circle.
+- **Variable delay**: each step waits 15–40 ms, producing realistic cursor speeds.
+
+## REST engines
+
+### Pinterest
+
+Pinterest exposes a bookmark-based pagination API. The controller passes a `bookmark` token returned by each response to fetch the next page, continuing until the bookmark value is `"-end-"` or the item limit is reached. No browser is required — requests are made directly with `fetch` and session cookies from environment variables.
+
+### Pixiv
+
+Pixiv's AJAX API returns illustration metadata in pages of up to 48 items. The controller chunks the full ID list into blocks of 48 and issues parallel requests per chunk:
+
+```javascript controllers/pixivController.js
+const chunkSize = 48;
+const chunks = [];
+for (let i = 0; i < combinedIds.length; i += chunkSize)
+    chunks.push(combinedIds.slice(i, i + chunkSize));
+
+const worksMetadata = await Promise.all(chunks.map(async (chunk) => {
+    const idsQuery = chunk.map(item => `ids%5B%5D=${item.id}`).join('&');
+    const url = `${apiBase}/profile/illusts?${idsQuery}&work_category=illust&is_first_page=1&lang=en`;
+    const r = await fetch(url, { headers: PIXIV_HEADERS });
+    const j = await r.json();
+    return Object.values(j.body.works || {});
+}));
+```
+
+Pixiv's CDN enforces `Referer` checking on original image URLs. Each download request spoofs the referer to the specific artwork page:
+
+```javascript controllers/pixivController.js
+const finalDownloads = await mapLimit(tasks, process.env.THREADS_DOWNLOAD || 5, async (item) => {
+    return await downloadFile(item.url, item.dest, item.filename, {
+        ...PIXIV_HEADERS,
+        'Referer': `https://www.pixiv.net/en/artworks/${item.id}`
+    });
+});
+```
+
+## DeviantArt hybrid engine
+
+DeviantArt is the most complex engine because the scraping strategy depends on whether valid credentials are present.
+
+### Dual path
+
+```text
+authService.getFreshAuth(username)
+        │
+        ├─ authenticated = true  ──▶  galleryService.fetchViaApi()
+        │                              (DeviantArt API with CSRF token)
+        │
+        └─ authenticated = false ──▶  galleryService.fetchViaHtml()
+                                       (HTML parsing, no account required)
+```
+
+The `daAuthService` always runs first. It launches a Puppeteer session, navigates to the user's DeviantArt page, and attempts to extract authentication state.
+
+### PerimeterX cookie injection
+
+DeviantArt uses PerimeterX for bot protection. The auth service injects three cookies from environment variables before the page loads:
+
+| Cookie | Environment variable | Purpose |
+|---|---|---|
+| `_px3` | `DA_PX` | PerimeterX session token |
+| `_pxvid` | `DA_PXVID` | PerimeterX visitor ID |
+| `_pxcts` | `DA_PXCTS` | PerimeterX timestamp |
+
+### CSRF token interception
+
+Similar to the X engine, the DeviantArt auth service monitors network responses to capture the CSRF token that DeviantArt's API requires:
+
+```javascript services/daAuthService.js (pattern)
+page.on('response', async (response) => {
+    // intercepts JSON responses containing the csrf_token field
+});
+```
+
+If no CSRF token can be extracted after the page loads, the controller throws an error (`"Bloqueo persistente: No se pudo extraer el CSRF Token"`) rather than proceeding with a partial auth state.
+
+### Smart Fullview URL fallback
+
+DeviantArt serves multiple image URL variants (thumbnail, preview, fullview). The gallery service prefers the highest-resolution `fullview` URL and falls back gracefully when it is not present in the API response.
+
+<Note>
+  DeviantArt's unauthenticated path (`fetchViaHtml`) uses HTML parsing and may miss images that are only accessible to logged-in users. To scrape members-only galleries, supply valid `DA_PX`, `DA_PXVID`, and `DA_PXCTS` environment variables.
+</Note>

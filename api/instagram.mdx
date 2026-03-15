@@ -1,0 +1,110 @@
+---
+title: "Instagram"
+description: "Download Stories, Highlights, Posts, and Reels from an Instagram account."
+---
+
+## Endpoint
+
+```
+GET /instagram/get-all-media
+```
+
+## Authentication
+
+Set the following variables in your `.env` file:
+
+| Variable | Description |
+|---|---|
+| `INSTA_SESSIONID` | Value of the `sessionid` cookie from a logged-in Instagram session |
+| `INSTA_CSRF_TOKEN` | Value of the `csrftoken` cookie from a logged-in Instagram session |
+
+<Note>
+  Both cookies are injected as secure, HTTP-only cookies on the `.instagram.com` domain before any navigation occurs.
+</Note>
+
+## Query parameters
+
+<ParamField query="username" type="string" required>
+  The Instagram username of the account to download from.
+</ParamField>
+
+<ParamField query="limit" type="integer">
+  Maximum number of media items to collect across all content types. Omit to collect all available content.
+</ParamField>
+
+<ParamField query="mediaType" type="string">
+  Comma-separated list of content categories to include. Accepted values: `posts`, `highlights`, `stories`. Defaults to all three if omitted or set to `null`.
+</ParamField>
+
+<ParamField query="method" type="string" default="normal">
+  Download strategy. Accepted values:
+
+  - `normal` — downloads each media item in real-time as it is intercepted.
+  - `batch` — collects all media URLs first, then downloads them concurrently using a parallel worker pool.
+</ParamField>
+
+## curl example
+
+```bash
+curl "http://localhost:3000/instagram/get-all-media?username=exampleaccount&limit=80&mediaType=posts,stories"
+```
+
+## Response example
+
+```json
+{
+  "status": true,
+  "profile": {
+    "id": "44556677889",
+    "username": "exampleaccount",
+    "nickname": "Example Account",
+    "picture": "https://scontent.cdninstagram.com/v/t51.2885-19/profile_hd.jpg",
+    "header": "",
+    "url": "https://www.instagram.com/exampleaccount"
+  },
+  "total_requested": 80,
+  "total_proccessed": 80,
+  "downloads": [
+    { "status": "downloaded", "fileName": "profile_picture.jpg" },
+    { "status": "downloaded", "fileName": "3344556677889900.jpg" },
+    { "status": "downloaded", "fileName": "2233445566778899.mp4" },
+    { "status": "exists", "fileName": "1122334455667788.jpg" }
+  ]
+}
+```
+
+<Note>
+  The response key is `total_proccessed` (with a double `c`) — this is the field name used by the Instagram controller.
+</Note>
+
+## Notes
+
+<Note>
+  SMF navigates through Stories, Highlights, and Posts pages in sequence, depending on which content types are enabled via `mediaType`. Media URLs are intercepted from GraphQL (`/graphql/query`) and REST (`/api/v1/`) responses.
+</Note>
+
+<Note>
+  Stories are fetched by navigating to `/stories/{username}/` and extracting items from inline `<script data-sjs>` tags. This captures story items that may not be accessible via scroll-based interception.
+</Note>
+
+<Note>
+  Highlights are collected by clicking each highlight ring on the profile page. Up to the detected count of highlights are processed, subject to the `limit`.
+</Note>
+
+<Note>
+  Profile picture is downloaded as `profile_picture.jpg` using the HD profile image URL (`hd_profile_pic_url_info.url`) from the first intercepted post response.
+</Note>
+
+<Tip>
+  Media is organised by content type into subdirectories: `posts/images/`, `posts/videos/`, `stories/images/`, `stories/videos/`, `highlights/images/`, and `highlights/videos/`.
+</Tip>
+
+<Warning>
+  Downloading Highlights requires clicking each ring individually in the browser. This process adds several seconds per highlight and is proportional to the number of highlights on the account.
+</Warning>
+
+## Error codes
+
+| HTTP status | `error` value | Cause |
+|---|---|---|
+| 500 | Any message | Browser launch failure, authentication error, or network problem. Check that `INSTA_SESSIONID` and `INSTA_CSRF_TOKEN` are set and valid. |

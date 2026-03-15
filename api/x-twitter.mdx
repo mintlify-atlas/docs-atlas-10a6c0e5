@@ -1,0 +1,96 @@
+---
+title: "X (Twitter)"
+description: "Download all media from an X (Twitter) user's media tab."
+---
+
+## Endpoint
+
+```
+GET /x/get-all-media
+```
+
+## Authentication
+
+Set the following variable in your `.env` file:
+
+| Variable | Description |
+|---|---|
+| `X_AUTH_TOKEN` | Value of the `auth_token` cookie from a logged-in X session |
+
+<Note>
+  The token is injected as a browser cookie before navigation begins. X requires an authenticated session to access the full `UserTweets` and `UserMedia` GraphQL responses.
+</Note>
+
+## Query parameters
+
+<ParamField query="username" type="string" required>
+  The X username of the account (with or without `@`). The `@` prefix is stripped automatically.
+</ParamField>
+
+<ParamField query="limit" type="integer">
+  Maximum number of distinct media items to collect. Collection stops once this count is reached.
+</ParamField>
+
+<ParamField query="method" type="string" default="normal">
+  Download strategy. Accepted values:
+
+  - `normal` — downloads each media item in real-time as it is intercepted during scrolling.
+  - `batch` — collects all media URLs first by scrolling to completion, then downloads them concurrently using a parallel worker pool.
+</ParamField>
+
+## curl example
+
+```bash
+curl "http://localhost:3000/x/get-all-media?username=exampleuser&limit=100&method=batch"
+```
+
+## Response example
+
+```json
+{
+  "status": true,
+  "profile": {
+    "id": "987654321",
+    "username": "exampleuser",
+    "nickname": "Example User",
+    "picture": "https://pbs.twimg.com/profile_images/123/photo_400x400.jpg",
+    "header": "",
+    "url": "https://x.com/exampleuser"
+  },
+  "total_requested": 100,
+  "total_proccessed": 100,
+  "downloads": [
+    { "status": "downloaded", "fileName": "Abc1234567890.jpg" },
+    { "status": "downloaded", "fileName": "Def0987654321.mp4" },
+    { "status": "exists", "fileName": "Ghi1122334455.jpg" }
+  ]
+}
+```
+
+<Note>
+  The response key is `total_proccessed` (with a double `c`) — this is the field name used by the X controller.
+</Note>
+
+## Notes
+
+<Note>
+  SMF intercepts `UserTweets` and `UserMedia` GraphQL network responses during automated scrolling to extract media URLs and profile metadata. No separate API calls are made.
+</Note>
+
+<Note>
+  Stagnation detection stops the scroll loop after **3 consecutive scroll iterations** that produce no new media items. This handles accounts where the end of the media tab has been reached or the session has been rate-limited.
+</Note>
+
+<Tip>
+  Use `method=batch` when downloading large archives. It collects all URLs before starting downloads, which allows the full concurrency pool to be used from the start. Use `method=normal` when you want downloads to begin immediately during collection.
+</Tip>
+
+<Warning>
+  Media files are separated into `images/` and `videos/` subfolders within the user's storage directory. Video files use the `.mp4` extension; all other media uses the detected extension.
+</Warning>
+
+## Error codes
+
+| HTTP status | `error` value | Cause |
+|---|---|---|
+| 500 | Any message | Browser launch failure, authentication error, or network problem. Check that `X_AUTH_TOKEN` is set and valid. |

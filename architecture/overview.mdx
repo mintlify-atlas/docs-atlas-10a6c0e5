@@ -1,0 +1,146 @@
+---
+title: "Architecture overview"
+description: "How Social Media Fetcher is structured: layers, responsibilities, and data flow."
+---
+
+Social Media Fetcher (SMF) is a Node.js REST API organized into four distinct layers. Each layer has a single responsibility, and dependencies flow strictly downward: controllers call services and utils; services call utils; nothing calls back up the stack.
+
+## Directory structure
+
+```text
+├── app.js                          # Express entry point, route registration
+├── controllers/
+│   ├── xController.js              # X (Twitter)
+│   ├── deviantartController.js     # DeviantArt
+│   ├── pixivController.js          # Pixiv
+│   ├── pinterestController.js      # Pinterest
+│   ├── instagramController.js      # Instagram
+│   ├── tiktokController.js         # TikTok
+│   ├── threadsController.js        # Threads
+│   └── onlyfansController.js       # OnlyFans
+├── services/
+│   ├── downloadService.js          # Stream-based file download
+│   ├── daAuthService.js            # DeviantArt auth + cookie extraction
+│   └── daGalleryService.js         # DeviantArt gallery API/HTML fetching
+├── models/
+│   └── Profile.js                  # Normalized user profile across platforms
+└── utils/
+    ├── utils.js                    # mapLimit, moveMouseInCircle, sanitizeFilename
+    ├── x.js                        # X JSON response parser + media picker
+    ├── deviantart.js               # DeviantArt-specific helpers
+    ├── instagram.js                # Instagram-specific helpers
+    ├── threads.js                  # Threads-specific helpers
+    └── onlyfans.js                 # OnlyFans-specific helpers
+```
+
+## Layers
+
+### Controllers
+
+One controller per platform. Each controller owns the full request/response lifecycle:
+
+1. Parse query parameters (`username`, `limit`, `method`)
+2. Launch a browser session (Puppeteer engines) or issue API calls (REST engines)
+3. Inject auth cookies or API credentials from environment variables
+4. Scroll/paginate until the item limit is reached or the feed is exhausted
+5. Collect media URLs, then dispatch downloads through `downloadService`
+6. Return a structured JSON response with the scraped profile and download results
+
+### Services
+
+| Service | Responsibility |
+|---|---|
+| `downloadService.js` | Streams a single file to disk via an axios pipeline; skips files that already exist |
+| `daAuthService.js` | Launches Puppeteer against DeviantArt, extracts CSRF token and PerimeterX cookies |
+| `daGalleryService.js` | Fetches gallery items either through the DeviantArt API (authenticated) or HTML parsing (unauthenticated) |
+
+### Utils
+
+| Utility | Exports |
+|---|---|
+| `utils.js` | `mapLimit` — bounded concurrency pool; `moveMouseInCircle` — anti-detection mouse movement; `sanitizeFilename` — cross-platform filename cleaning |
+| `x.js` | `extractMediaFromXJson` — walks the X API JSON tree to collect image/video URLs and user data |
+| `deviantart.js`, `instagram.js`, `threads.js`, `onlyfans.js` | Platform-specific parsing helpers |
+
+### Models
+
+`Profile` normalizes user data across every platform into a consistent shape:
+
+```javascript models/Profile.js
+class Profile {
+    constructor({ id, nickname, username, picture, header = '', url }) {
+        this.id = id;
+        this.nickname = nickname;
+        this.username = username 
+            ? String(username).replace(/^@/, '') 
+            : '';
+        this.picture = picture;
+        this.header = header;
+        this.url = url;
+    }
+    isValid() {
+        return !!(this.id && this.username && this.picture);
+    }
+}
+```
+
+Every controller constructs a `Profile` instance and returns it in the JSON response, so API consumers always receive the same fields regardless of which platform was scraped.
+
+## Engine types
+
+SMF uses two fundamentally different scraping strategies depending on how accessible a platform's data is.
+
+<CardGroup cols={2}>
+  <Card title="Puppeteer Stealth engines" icon="globe">
+    **Platforms:** DeviantArt, OnlyFans, X, TikTok, Threads, Instagram
+
+    Launch a headless Chrome instance with `puppeteer-extra-plugin-stealth` to bypass bot detection, inject session cookies, and intercept network responses. Required when platforms enforce JavaScript-rendered auth flows or aggressively fingerprint clients.
+  </Card>
+  <Card title="REST engines" icon="bolt">
+    **Platforms:** Pinterest, Pixiv
+
+    Issue direct HTTP requests to the platform's own API endpoints. Significantly faster and lighter than launching a browser. Possible when platforms expose accessible JSON APIs that accept session cookies or tokens without additional JS execution.
+  </Card>
+</CardGroup>
+
+See [Platform engines](/architecture/engines) for implementation details per platform.
+
+## Data flow
+
+```text
+HTTP GET /x/get-all-media?username=foo&limit=50
+        │
+        ▼
+┌─────────────────┐
+│   Controller    │  Parse params, build output folder path
+└────────┬────────┘
+         │
+         ▼
+┌─────────────────┐
+│  Browser / API  │  Inject auth_token cookie / API credentials
+└────────┬────────┘
+         │
+         ▼
+┌─────────────────┐
+│ Scroll/Paginate │  Scroll feed or paginate API; intercept responses
+└────────┬────────┘
+         │
+         ▼
+┌─────────────────┐
+│  Media collect  │  Parse JSON responses → extract URLs → deduplicate via Set
+└────────┬────────┘
+         │
+         ▼
+┌─────────────────┐
+│ mapLimit(tasks) │  Bounded concurrent downloads via downloadService
+└────────┬────────┘
+         │
+         ▼
+┌─────────────────┐
+│  JSON response  │  { status, profile, total_processed, downloads[] }
+└─────────────────┘
+```
+
+<Note>
+  All downloaded files are written to subdirectories under `DIR_STORAGE` (set via environment variable). The controller constructs the path as `DIR_STORAGE/<platform>/<username>/`. Files that already exist on disk are skipped automatically by `downloadService`.
+</Note>

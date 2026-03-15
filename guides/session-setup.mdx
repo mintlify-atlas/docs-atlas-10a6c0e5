@@ -1,0 +1,138 @@
+---
+title: "Session setup"
+description: "Setting up persistent browser sessions for platforms that require manual login."
+---
+
+Some platforms cannot be authenticated via static cookies alone. This guide covers session persistence for **OnlyFans** (which requires a full browser profile) and the **DeviantArt hybrid authentication** system.
+
+## OnlyFans — persistent browser profile
+
+OnlyFans uses aggressive bot detection that invalidates cookie-based approaches. SMF works around this by running a real Chrome browser instance (via Puppeteer) that stores its full profile on disk — cookies, localStorage, IndexedDB, and all.
+
+The profile is stored at:
+
+```
+config/of_profile/
+```
+
+This is a standard Chrome user data directory. Once you log in manually the first time, that session is persisted and reused automatically on every subsequent run.
+
+### How `userDataDir` works
+
+SMF launches Puppeteer with the `userDataDir` option pointing at the profile folder:
+
+```javascript
+const USER_DATA_DIR = path.join(__dirname, '../config/of_profile');
+
+browser = await puppeteer.launch({
+    headless: false,
+    userDataDir: USER_DATA_DIR,
+    args: [
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--start-maximized',
+        '--disable-web-security',
+        '--disable-features=IsolateOrigins,site-per-process'
+    ]
+});
+```
+
+Setting `headless: false` is what makes the Chrome window visible so you can log in interactively. After the first login, the session is stored in `config/of_profile/` and future launches reuse it — the window still opens but you will be logged in automatically.
+
+### First-time setup
+
+<Steps>
+  <Step title="Start SMF and call the OnlyFans endpoint">
+    Send a request to `/onlyfans/get-all-media?username=<target_username>`. SMF will launch a visible Chrome window and navigate to `onlyfans.com`.
+  </Step>
+
+  <Step title="Log in manually in the Chrome window">
+    The browser opens at `https://onlyfans.com/`. Enter your credentials and complete any two-factor authentication. SMF waits up to 5 minutes for the `auth_id` cookie to appear:
+
+    ```javascript
+    await page.waitForFunction(() => {
+        return document.cookie.includes('auth_id') || !!document.querySelector('.b-chat__header');
+    }, { timeout: 300000 });
+    ```
+  </Step>
+
+  <Step title="Session is detected and saved">
+    Once login is confirmed, SMF logs `Login detectado y persistido en el perfil` and continues scraping the target profile. The Chrome profile (including your session cookies) is written to `config/of_profile/`.
+  </Step>
+
+  <Step title="Subsequent runs are automatic">
+    On the next request, SMF launches Chrome, loads the saved profile, and logs `Sesión recuperada automáticamente desde el perfil` — no manual login required.
+
+    ```javascript
+    let loggedIn = await checkLogin(page); // checks for auth_id cookie
+
+    if (!loggedIn) {
+        console.log('No se detectó sesión activa. ESPERANDO LOGIN MANUAL...');
+        // waits for manual login
+    } else {
+        console.log('Sesión recuperada automáticamente desde el perfil.');
+    }
+    ```
+  </Step>
+</Steps>
+
+<Tip>
+  Back up the `config/of_profile/` folder after your first successful login, especially if it required SMS verification or a manual CAPTCHA. If the folder is deleted or corrupted, you will need to log in again from scratch.
+</Tip>
+
+---
+
+## DeviantArt — hybrid authentication
+
+DeviantArt uses a dual-path system managed by `daAuthService.js`. The path taken depends on whether valid auth cookies are present in `.env`.
+
+### Authentication paths
+
+| Condition | Path | Method |
+|-----------|------|--------|
+| Auth cookies present and valid | **Authenticated** | DeviantArt internal API (`_puppy` endpoints) |
+| No cookies or invalid session | **Unauthenticated** | HTML scraping via DOM evaluation |
+
+The controller checks which path to use after calling `authService.getFreshAuth()`:
+
+```javascript
+const { csrfToken, cookies, ua, profile, authenticated } = await authService.getFreshAuth(userProfile.username);
+
+if (authenticated) {
+    const { tasks: apiTasks, authorInfo } = await galleryService.fetchViaApi({ 
+        username: userProfile.username, csrfToken, cookies, ua, maxItems, userFolder 
+    });
+    mediaTasks = apiTasks;
+} else {
+    mediaTasks = await galleryService.fetchViaHtml({ 
+        username: userProfile.username, ua, maxItems, userFolder 
+    });
+}
+```
+
+### CSRF token extraction
+
+The `_puppy` API endpoints require a CSRF token. `daAuthService.js` extracts it via network interception — it intercepts outbound requests and captures the token from query parameters before the page finishes loading:
+
+```javascript
+await page.setRequestInterception(true);
+page.on('request', (request) => {
+    const url = request.url();
+    if (url.includes('csrf_token=') && url.includes('_puppy')) {
+        const urlParams = new URLSearchParams(url.split('?')[1]);
+        const token = urlParams.get('csrf_token');
+        if (token && token.length > 10) capturedToken = token;
+    }
+    request.continue();
+});
+```
+
+If network interception yields nothing (e.g., slow page load), the service falls back to reading `window.__INITIAL_STATE__.config.csrfToken` from the page's JavaScript state, then to a regex scan of the raw HTML.
+
+After obtaining the token, the service calls the `_puppy/damz/session` endpoint to verify whether the injected cookies represent a valid authenticated session. If the API returns an error, `authenticated` is set to `false` and the HTML scraping path is used instead.
+
+### PerimeterX cookies
+
+<Note>
+  `DA_PX` is a long-duration PerimeterX cookie that tells DeviantArt's bot-detection system this is a known, trusted browser. Providing it reduces the likelihood of CAPTCHAs and IP-level blocks during headless browsing. `DA_PXVID` and `DA_PXCTS` are companion cookies for the same system. Extract all three from a real browser session on `deviantart.com` and add them to `.env` alongside the standard auth cookies.
+</Note>

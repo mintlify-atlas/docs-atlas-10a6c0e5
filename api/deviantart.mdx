@@ -1,0 +1,89 @@
+---
+title: "DeviantArt"
+description: "Download a DeviantArt user's full gallery, profile picture, and header image."
+---
+
+## Endpoint
+
+```
+GET /deviantart/get-all-media
+```
+
+## Authentication
+
+Set the following variables in your `.env` file. These correspond to DeviantArt session cookies obtained from a logged-in browser session.
+
+| Variable | Description |
+|---|---|
+| `DA_AUTH` | `auth` cookie value |
+| `DA_AUTH_SECURE` | `auth_secure` cookie value |
+| `DA_USERINFO` | `userinfo` cookie value |
+| `DA_PX` | `px` cookie value |
+| `DA_PXVID` | `pxvid` cookie value |
+| `DA_PXCTS` | `pxcts` cookie value |
+
+<Note>
+  If valid cookies are present, SMF uses the authenticated DeviantArt API to access full-quality original files. If authentication fails or cookies are absent, it automatically falls back to HTML scraping. Scraped downloads may have lower quality than originals.
+</Note>
+
+## Query parameters
+
+<ParamField query="username" type="string" required>
+  The DeviantArt username of the account to download from.
+</ParamField>
+
+<ParamField query="limit" type="integer">
+  Maximum number of media items to download. Includes profile images in the count. Omit to download the entire gallery.
+</ParamField>
+
+## curl example
+
+```bash
+curl "http://localhost:3000/deviantart/get-all-media?username=artgallery&limit=20"
+```
+
+## Response example
+
+```json
+{
+  "status": true,
+  "profile": {
+    "id": "987654321",
+    "username": "artgallery",
+    "nickname": "Art Gallery",
+    "picture": "https://a.deviantart.net/avatars-big/a/r/artgallery.jpg",
+    "header": "https://wixmp-123abc.wixmp.com/f/banner/artgallery_header.jpg",
+    "url": "https://www.deviantart.com/artgallery"
+  },
+  "total_requested": 20,
+  "total_processed": 20,
+  "downloads": [
+    { "status": "downloaded", "fileName": "profile_header.jpg" },
+    { "status": "downloaded", "fileName": "profile_picture.jpg" },
+    { "status": "downloaded", "fileName": "sunrise_landscape_p0.jpg" },
+    { "status": "exists", "fileName": "portrait_study_p0.png" }
+  ]
+}
+```
+
+## Notes
+
+<Note>
+  In addition to gallery artwork, SMF always attempts to download the account's profile header as `profile_header.jpg` and avatar as `profile_picture.jpg` into the same output folder.
+</Note>
+
+<Tip>
+  When using the authenticated API path, SMF fetches full-resolution originals directly. When falling back to HTML scraping, it uses a Smart Fullview URL strategy to retrieve the highest-quality version available if the original download button is inaccessible.
+</Tip>
+
+<Warning>
+  Downloads include a randomised jitter delay (500–1500 ms per file) to reduce the risk of rate limiting. Large galleries will take proportionally longer to complete.
+</Warning>
+
+## Error codes
+
+| HTTP status | `error` value | Cause |
+|---|---|---|
+| 400 | `"username is required"` | The `username` query parameter was not provided. |
+| 500 | `"Bloqueo persistente: No se pudo extraer el CSRF Token"` | DeviantArt blocked the request and no CSRF token could be extracted. Check cookies or retry later. |
+| 500 | Any other message | Network failure, scraping error, or unexpected API response. |
